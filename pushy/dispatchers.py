@@ -1,3 +1,4 @@
+import contextlib
 import random
 import apns
 from threading import Event
@@ -161,6 +162,27 @@ class APNSDispatcher(Dispatcher):
         return push_result, 0
 
 
+@contextlib.contextmanager
+def python_279_urllib2_ssl_unverified_context():
+    """
+    Python >= 2.7.9 introduces changes to httplib and how it validates SSL requests,
+    for more information read https://bugs.python.org/issue22417.
+    """
+    import sys
+    import ssl
+
+    if sys.version_info[:3] >= (2, 7, 9):
+        create_default_context = ssl._create_default_https_context
+        ssl._create_default_https_context = ssl._create_unverified_context
+    else:
+        create_default_context = None
+
+    yield
+
+    if create_default_context is not None:
+        ssl._create_default_https_context = create_default_context
+
+
 class GCMDispatcher(Dispatcher):
     def send(self, device_key, data):
         gcm_api_key = getattr(settings, 'PUSHY_GCM_API_KEY', None)
@@ -183,7 +205,8 @@ class GCMDispatcher(Dispatcher):
                 request_method = gcm.plaintext_request
                 registration_id = device_key
 
-            canonical_id = request_method(registration_id, data=data)
+            with python_279_urllib2_ssl_unverified_context():
+                canonical_id = request_method(registration_id, data=data)
 
             if canonical_id:
                 return self.PUSH_RESULT_SENT, canonical_id
