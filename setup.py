@@ -1,5 +1,15 @@
 from setuptools import setup, find_packages
 
+import os
+
+requirements_txt = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    'requirements.txt'
+)
+
+with open(requirements_txt) as requirements:
+    install_requires = [r.strip() for r in requirements.readlines()]
+
 setup(
     name='Django-Pushy',
     version='0.1.11',
@@ -25,12 +35,7 @@ setup(
     long_description=open('README.rst').read(),
 
     # Dependent packages (distributions)
-    install_requires=[
-        'django>=1.6',
-        'python-gcm==0.4',
-        'django-celery==3.1.17',
-        'apns==2.0.1'
-    ],
+    install_requires = install_requires,
     extras_require={
         'rest_api': ['djangorestframework>=3.0,<3.3']
     }
