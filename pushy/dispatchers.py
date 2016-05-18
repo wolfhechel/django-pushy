@@ -10,8 +10,8 @@ from gcm.gcm import (
 
 from django.conf import settings
 
-from models import Device
-from exceptions import (
+from .models import Device
+from .exceptions import (
     PushException,
     PushGCMApiKeyException,
     PushAPNsCertificateException
