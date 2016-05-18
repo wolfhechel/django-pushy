@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.settings import api_settings
 from pushy.models import Device
 
-from serializers import DeviceSerializer
+from .serializers import DeviceSerializer
 
 
 class DeviceViewSet(viewsets.ViewSet):

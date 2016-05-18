@@ -1,12 +1,12 @@
 import datetime
-import mock
 
 from django.contrib.auth import get_user_model
+
 from django.test import TestCase
 from django.test.utils import override_settings
 from django.utils import timezone
 
-from gcm.gcm import GCMNotRegisteredException
+import pushjack
 
 from pushy.models import (
     PushNotification,
@@ -21,6 +21,8 @@ from pushy.tasks import (
     create_push_notification_groups,
     clean_sent_notifications
 )
+
+from .compat import mock
 
 
 class TasksTestCase(TestCase):
@@ -133,18 +135,20 @@ class TasksTestCase(TestCase):
         device = Device.objects.create(key='TEST_DEVICE_KEY_ANDROID', type=Device.DEVICE_TYPE_ANDROID)
 
         # Make sure canonical ID is saved
-        gcm = mock.Mock()
-        gcm.return_value = 123123
-        with mock.patch('gcm.GCM.plaintext_request', new=gcm):
+        response = pushjack.GCMResponse([])
+        response.canonical_ids.append(pushjack.GCMCanonicalID(old_id = device.key, new_id=123123))
+        gcm = mock.Mock(return_value=response)
+        with mock.patch('pushjack.gcm.GCMConnection.send', new=gcm):
             send_push_notification_group(notification.id, 0, 1)
 
             device = Device.objects.get(pk=device.id)
             self.assertEqual(device.key, '123123')
 
         # Make sure the key is deleted when not registered exception is fired
-        gcm = mock.Mock()
-        gcm.side_effect = GCMNotRegisteredException
-        with mock.patch('gcm.GCM.plaintext_request', new=gcm):
+        response = pushjack.GCMResponse([])
+        response.errors.append(pushjack.GCMInvalidRegistrationError(123))
+        gcm = mock.Mock(return_value=response)
+        with mock.patch('pushjack.gcm.GCMConnection.send', new=gcm):
             send_push_notification_group(notification.id, 0, 1)
 
             self.assertRaises(Device.DoesNotExist, Device.objects.get, pk=device.id)
@@ -153,9 +157,9 @@ class TasksTestCase(TestCase):
         device = Device.objects.create(key='TEST_DEVICE_KEY_ANDROID2', type=Device.DEVICE_TYPE_ANDROID)
 
         # No canonical ID wasn't returned
-        gcm = mock.Mock()
-        gcm.return_value = False
-        with mock.patch('gcm.GCM.plaintext_request', new=gcm):
+        response = pushjack.GCMResponse([])
+        gcm = mock.Mock(return_value=response)
+        with mock.patch('pushjack.gcm.GCMConnection.send', new=gcm):
             send_push_notification_group(notification.id, 0, 1)
 
             device = Device.objects.get(pk=device.id)
@@ -174,7 +178,7 @@ class TasksTestCase(TestCase):
 
     @override_settings(PUSHY_NOTIFICATION_MAX_AGE=datetime.timedelta(days=90))
     def test_delete_old_notifications(self):
-        for i in xrange(10):
+        for i in range(10):
             date_started = timezone.now() - datetime.timedelta(days=91)
             date_finished = date_started
             notification = PushNotification()
@@ -191,7 +195,7 @@ class TasksTestCase(TestCase):
 
     @override_settings(PUSHY_NOTIFICATION_MAX_AGE=datetime.timedelta(days=90))
     def test_delete_old_notifications_with_remaining_onces(self):
-        for i in xrange(10):
+        for i in range(10):
             date_started = timezone.now() - datetime.timedelta(days=91)
             date_finished = date_started
             notification = PushNotification()
@@ -202,7 +206,7 @@ class TasksTestCase(TestCase):
             notification.date_finished = date_finished
             notification.save()
 
-        for i in xrange(10):
+        for i in range(10):
             date_started = timezone.now() - datetime.timedelta(days=61)
             date_finished = date_started
             notification = PushNotification()

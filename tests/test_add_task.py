@@ -1,8 +1,10 @@
 from django.contrib.auth import get_user_model
-import mock
 from django.test import TestCase
+
 from pushy.utils import send_push_notification
 from pushy.models import PushNotification, Device
+
+from .compat import mock
 
 
 class AddTaskTestCase(TestCase):

@@ -1,13 +1,13 @@
-from django.test.utils import override_settings
-import mock
-from gcm.gcm import GCMNotRegisteredException
-
 from django.test import TestCase
 
-from pushy.exceptions import PushException, PushGCMApiKeyException, PushAPNsCertificateException
+from pushy.exceptions import PushGCMApiKeyException, PushAPNsCertificateException
 
 from pushy.models import Device
 from pushy import dispatchers
+import pushjack
+
+from .compat import mock
+
 
 
 class DispatchersTestCase(TestCase):
@@ -42,92 +42,40 @@ class DispatchersTestCase(TestCase):
         with mock.patch('django.conf.settings.PUSHY_GCM_API_KEY', new=None):
             self.assertRaises(PushGCMApiKeyException, android.send, device_key, data)
 
-        with mock.patch('django.conf.settings.PUSHY_GCM_JSON_PAYLOAD', new=True):
-            with mock.patch('gcm.GCM.json_request') as json_request_mock:
-                android.send(device_key, data)
-
-                self.assertTrue(json_request_mock.called)
-
         # Check result when canonical value is returned
-        gcm = mock.Mock()
-        gcm.return_value = 123123
-        with mock.patch('gcm.GCM.plaintext_request', new=gcm):
+        response = pushjack.GCMResponse([])
+        response.canonical_ids.append(pushjack.GCMCanonicalID(old_id = device_key, new_id=123123))
+
+        gcm = mock.Mock(return_value=response)
+        with mock.patch('pushjack.gcm.GCMConnection.send', new=gcm):
             result, canonical_id = android.send(device_key, data)
 
             self.assertEquals(result, dispatchers.GCMDispatcher.PUSH_RESULT_SENT)
             self.assertEquals(canonical_id, 123123)
 
+        response = pushjack.GCMResponse([])
+        response.errors.append(pushjack.GCMInvalidRegistrationError(123))
+
         # Check not registered exception
-        gcm = mock.Mock(side_effect=GCMNotRegisteredException)
-        with mock.patch('gcm.GCM.plaintext_request', new=gcm):
+        gcm = mock.Mock(return_value=response)
+        with mock.patch('pushjack.gcm.GCMConnection.send', new=gcm):
             result, canonical_id = android.send(device_key, data)
 
             self.assertEquals(result, dispatchers.GCMDispatcher.PUSH_RESULT_NOT_REGISTERED)
             self.assertEquals(canonical_id, 0)
 
-        # Check IOError
-        gcm = mock.Mock(side_effect=IOError)
-        with mock.patch('gcm.GCM.plaintext_request', new=gcm):
+        response = pushjack.GCMResponse([])
+        response.errors.append(pushjack.GCMInternalServerError(123))
+
+        # Check other potential errors
+        gcm = mock.Mock(return_value=response)
+        with mock.patch('pushjack.gcm.GCMConnection.send', new=gcm):
             result, canonical_id = android.send(device_key, data)
 
             self.assertEquals(result, dispatchers.GCMDispatcher.PUSH_RESULT_EXCEPTION)
             self.assertEquals(canonical_id, 0)
 
-        # Check all other exceptions
-        gcm = mock.Mock(side_effect=PushException)
-        with mock.patch('gcm.GCM.plaintext_request', new=gcm):
-            result, canonical_id = android.send(device_key, data)
 
-            self.assertEquals(result, dispatchers.GCMDispatcher.PUSH_RESULT_EXCEPTION)
-            self.assertEquals(canonical_id, 0)
-
-    @mock.patch('gcm.GCM.json_request')
-    def test__send_json(self, json_request_mock):
-        android = dispatchers.get_dispatcher(Device.DEVICE_TYPE_ANDROID)
-
-        assert isinstance(android, dispatchers.GCMDispatcher)
-
-        api_key = 'TEST_API_KEY'
-        device_key = 'TEST_DEVICE_KEY'
-        data = {'title': 'Test', 'body': 'Test body'}
-
-        gcm_client = dispatchers.GCM(api_key)
-
-        # Test canonical not update
-        json_request_mock.return_value = {}
-        self.assertEqual(android._send_json(gcm_client, device_key, data), 0)
-
-        # Test canonical updated
-        canonical_id = 'TEST_CANONICAL'
-        json_request_mock.return_value = {
-            'canonical': {
-                device_key: canonical_id
-            }
-        }
-        self.assertEqual(android._send_json(gcm_client, device_key, data), canonical_id)
-
-        # Test Missing Registration
-        json_request_mock.return_value = {
-            'errors': {
-                'NotRegistered': [device_key]
-            }
-        }
-        self.assertRaises(dispatchers.GCMNotRegisteredException,
-                          android._send_json, gcm_client, device_key, data)
-
-        # Test handling unexpected (server) errors
-
-        json_request_mock.return_value = {
-            'errors': {
-                'InternalServerError': [device_key]
-            }
-        }
-        self.assertRaises(dispatchers.GCMException,
-                          android._send_json, gcm_client, device_key, data)
-
-
-@mock.patch('pushy.dispatchers.APNSDispatcher._send_notification',
-            new=lambda *a: dispatchers.APNSDispatcher.ErrorResponseEvent())
 class ApnsDispatcherTests(TestCase):
 
     dispatcher = None
@@ -145,29 +93,36 @@ class ApnsDispatcherTests(TestCase):
     def test_certificate_exception_on_send(self):
         self.assertRaises(PushAPNsCertificateException, self.dispatcher.send, self.device_key, self.data)
 
-    @mock.patch('pushy.dispatchers.APNSDispatcher.ErrorResponseEvent.wait_for_response')
-    def test_invalid_token_error_response(self, wait_for_response):
-        wait_for_response.return_value = dispatchers.APNSDispatcher.STATUS_CODE_INVALID_TOKEN
+    @mock.patch('pushjack.apns.APNSConnection.send')
+    def test_invalid_token_error_response(self, send):
+        send.return_value = pushjack.APNSResponse([self.device_key],
+                                                  [],
+                                                  [pushjack.APNSInvalidTokenError(0)])
 
         self.assertEqual(self.dispatcher.send(self.device_key, self.data),
                          (dispatchers.Dispatcher.PUSH_RESULT_NOT_REGISTERED, 0))
 
-        wait_for_response.return_value = dispatchers.APNSDispatcher.STATUS_CODE_INVALID_TOKEN_SIZE
+        send.return_value = pushjack.APNSResponse([self.device_key],
+                                                  [],
+                                                  [pushjack.APNSInvalidTokenSizeError(0)])
 
         self.assertEqual(self.dispatcher.send(self.device_key, self.data),
                          (dispatchers.Dispatcher.PUSH_RESULT_NOT_REGISTERED, 0))
 
-
-    @mock.patch('pushy.dispatchers.APNSDispatcher.ErrorResponseEvent.wait_for_response')
-    def test_push_exception(self, wait_for_response):
-        wait_for_response.return_value = dispatchers.APNSDispatcher.STATUS_CODE_INVALID_PAYLOAD_SIZE
+    @mock.patch('pushjack.apns.APNSConnection.send')
+    def test_push_exception(self, send):
+        send.return_value = pushjack.APNSResponse([self.device_key],
+                                                  [],
+                                                  [pushjack.APNSInvalidPayloadSizeError(0)])
 
         self.assertEqual(self.dispatcher.send(self.device_key, self.data),
                          (dispatchers.Dispatcher.PUSH_RESULT_EXCEPTION, 0))
 
-    @mock.patch('pushy.dispatchers.APNSDispatcher.ErrorResponseEvent.wait_for_response')
-    def test_push_sent(self, wait_for_response):
-        wait_for_response.return_value = dispatchers.APNSDispatcher.STATUS_CODE_NO_ERROR
+    @mock.patch('pushjack.apns.APNSConnection.send')
+    def test_push_sent(self, send):
+        send.return_value = pushjack.APNSResponse([self.device_key],
+                                                  [],
+                                                  [])
 
         self.assertEqual(self.dispatcher.send(self.device_key, self.data),
                          (dispatchers.Dispatcher.PUSH_RESULT_SENT, 0))
