@@ -93,7 +93,7 @@ class ApnsDispatcherTests(TestCase):
     def test_certificate_exception_on_send(self):
         self.assertRaises(PushAPNsCertificateException, self.dispatcher.send, self.device_key, self.data)
 
-    @mock.patch('pushjack.apns.APNSConnection.send')
+    @mock.patch('pushjack.apns.APNSClient.send')
     def test_invalid_token_error_response(self, send):
         send.return_value = pushjack.APNSResponse([self.device_key],
                                                   [],
@@ -109,7 +109,7 @@ class ApnsDispatcherTests(TestCase):
         self.assertEqual(self.dispatcher.send(self.device_key, self.data),
                          (dispatchers.Dispatcher.PUSH_RESULT_NOT_REGISTERED, 0))
 
-    @mock.patch('pushjack.apns.APNSConnection.send')
+    @mock.patch('pushjack.apns.APNSClient.send')
     def test_push_exception(self, send):
         send.return_value = pushjack.APNSResponse([self.device_key],
                                                   [],
@@ -118,7 +118,7 @@ class ApnsDispatcherTests(TestCase):
         self.assertEqual(self.dispatcher.send(self.device_key, self.data),
                          (dispatchers.Dispatcher.PUSH_RESULT_EXCEPTION, 0))
 
-    @mock.patch('pushjack.apns.APNSConnection.send')
+    @mock.patch('pushjack.apns.APNSClient.send')
     def test_push_sent(self, send):
         send.return_value = pushjack.APNSResponse([self.device_key],
                                                   [],

@@ -45,7 +45,7 @@ class APNSDispatcher(Dispatcher):
 
         assert isinstance(client, pushjack.APNSClient)
 
-        self.connection = client.create_connection()
+        self.connection = client
 
     def send(self, device_key, data):
         if not self.connection:
