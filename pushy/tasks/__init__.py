@@ -25,13 +25,14 @@ def check_pending_push_notifications():
 
 
 @celery.shared_task(
-    queue=getattr(settings, 'PUSHY_QUEUE_DEFAULT_NAME', None)
+    bind=True,
+    queue=getattr(settings, 'PUSHY_QUEUE_DEFAULT_NAME', None),
 )
-def create_push_notification_groups(notification_id):
+def create_push_notification_groups(self, notification_id):
     try:
         notification = PushNotification.objects.get(pk=notification_id)
-    except PushNotification.DoesNotExist:
-        return False
+    except PushNotification.DoesNotExist as exc:
+        raise self.retry(exc=exc, countdown=1)
 
     devices = get_filtered_devices_queryset(notification)
 
