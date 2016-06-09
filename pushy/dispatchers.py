@@ -47,11 +47,8 @@ class APNSDispatcher(Dispatcher):
 
         self.connection = client
 
-    def send(self, device_key, data):
-        if not self.connection:
-            self.establish_connection()
-
-        response = self.connection.send(
+    def _send(self, device_key, data):
+        return self.connection.send(
             [device_key],
             data.pop('alert', None),
             sound=data.pop('sound', None),
@@ -60,6 +57,16 @@ class APNSDispatcher(Dispatcher):
             content_available=data.pop('content-available', False),
             extra=data or {}
         )
+
+    def send(self, device_key, data):
+        if not self.connection:
+            self.establish_connection()
+
+        try:
+            response = self._send(device_key, data)
+        except BrokenPipeError: # Pushjack doesn't handle connection timeouts or broken pipes
+            self.establish_connection()
+            response = self._send(device_key, data)
 
         assert isinstance(response, pushjack.APNSResponse)
 
